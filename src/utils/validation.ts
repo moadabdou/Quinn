@@ -1,4 +1,4 @@
-import { GuildMember, TextChannel, PermissionFlagsBits, Collection } from "discord.js";
+import { GuildMember, PermissionFlagsBits, Collection } from "discord.js";
 import { Command } from "../types";
 import { ExtendedClient } from "../client";
 import { Context, CommandContext, MessageContext } from "../context";
@@ -129,7 +129,7 @@ export async function executeWithValidation(
 
     if (error) {
         logger.warn(`User ${ctx.author.tag} (${ctx.author.id}) was blocked from running command '${command.name}': ${error}`);
-        return ctx.reply({ content: error, ephemeral: true });
+        return ctx.reply(error, { ephemeral: true });
     }
 
     try {
@@ -138,9 +138,6 @@ export async function executeWithValidation(
         logger.info(`Successfully executed command: ${command.name} for ${ctx.author.tag}`);
     } catch (err) {
         logger.error(`Error executing command ${command.name} for ${ctx.author.tag}:`, err);
-        ctx.reply({
-            content: "There was an error running this command.",
-            ephemeral: true
-        });
+        ctx.reply("There was an error running this command.", { ephemeral: true });
     }
 }

@@ -1,4 +1,3 @@
-import { MessageEditOptions, InteractionEditReplyOptions } from "discord.js";
 import {
     ChatInputCommandInteraction,
     Message,
@@ -41,16 +40,20 @@ export abstract class Context {
     /** Gets the Unix timestamp of when the command was issued. */
     abstract get createdTimestamp(): number;
 
-    protected preparePayload(content: ReplyContent, ephemeral: boolean): any {
+    protected preparePayload(content: ReplyContent, ephemeral?: boolean): any {
         const payload: any =
             typeof content === "string" ? { content } : { ...content };
 
-        if (ephemeral) {
-            payload.flags = MessageFlags.Ephemeral;
-        } else if (payload.flags) {
-            delete payload.flags; // Simplify flag handling across endpoints
+        if (ephemeral !== undefined) {
+            if (ephemeral) {
+                payload.flags = MessageFlags.Ephemeral;
+            } else if (payload.flags) {
+                delete payload.flags; // Simplify flag handling across endpoints
+            }
         }
-        delete payload.ephemeral;
+        if ('ephemeral' in payload) {
+            delete payload.ephemeral;
+        }
 
         return payload;
     }
@@ -67,10 +70,11 @@ export abstract class Context {
     /**
      * Edits the initial reply sent by the `reply` method.
      * @param content The new string or message payload.
+     * @param options Object containing an ephemeral flag.
      * @returns A promise resolving to the edited Message object.
      * @throws {Error} If attempting to edit before sending an initial reply.
      */
-    abstract editReply(content: ReplyContent): Promise<Message>;
+    abstract editReply(content: ReplyContent, options?: { ephemeral?: boolean }): Promise<Message>;
 
     /**
      * Safely attempts to retrieve an attachment provided by the user.
@@ -78,6 +82,41 @@ export abstract class Context {
      * @returns A promise resolving to the Attachment object, or null if none is found.
      */
     abstract getAttachment(optionName?: string): Promise<Attachment | null>;
+
+    /**
+     * Explicitly defer the response. Extremely useful when the command has to do 
+     * heavy processing/fetching prior to the first reply. 
+     * @param ephemeral Whether the deferral should be hidden (slash commands only).
+     */
+    abstract defer(ephemeral?: boolean): Promise<void>;
+
+    /**
+     * Parses a GuildMember from the arguments/options.
+     * @param optionName The name of the option for slash commands.
+     * @param argIndex The index of the argument for prefix commands. Defaults to 0.
+     */
+    abstract parseMember(optionName: string, argIndex?: number): Promise<GuildMember | null>;
+
+    /**
+     * Parses a User from the arguments/options.
+     */
+    abstract parseUser(optionName: string, argIndex?: number): Promise<User | null>;
+
+    /**
+     * Parses a Channel from the arguments/options.
+     */
+    abstract parseChannel(optionName: string, argIndex?: number): Promise<any | null>;
+
+    /**
+     * Parses a String from the arguments/options.
+     * @param consumeRest For prefix commands: if true, slices from argIndex to the end.
+     */
+    abstract parseString(optionName: string, argIndex?: number, consumeRest?: boolean): string | null;
+
+    /**
+     * Parses an Integer from the arguments/options.
+     */
+    abstract parseInteger(optionName: string, argIndex?: number): number | null;
 }
 
 /**
@@ -117,11 +156,11 @@ export class CommandContext extends Context {
         return this.command.createdTimestamp;
     }
 
-    private async ensureDeferred(ephemeral = false) {
+    async defer(ephemeral: boolean = false): Promise<void> {
         if (this.deferred || this.replied) return;
 
         const deferOptions: InteractionDeferReplyOptions = ephemeral
-            ? { flags: MessageFlags.Ephemeral }
+            ? { ephemeral: true }
             : {};
         await this.command.deferReply(deferOptions);
         this.deferred = true;
@@ -131,9 +170,9 @@ export class CommandContext extends Context {
         content: ReplyContent,
         options?: { ephemeral?: boolean }
     ): Promise<Message> {
-        const isEphemeral = options?.ephemeral ?? (typeof content !== "string" && "ephemeral" in content ? content.ephemeral : false) ?? false;
+        const isEphemeral = options?.ephemeral;
 
-        await this.ensureDeferred(isEphemeral);
+        await this.defer(isEphemeral);
         const payload = this.preparePayload(content, isEphemeral);
 
         if (!this.replied) {
@@ -144,12 +183,11 @@ export class CommandContext extends Context {
         return (await this.command.followUp(payload)) as Message;
     }
 
-    async editReply(content: ReplyContent): Promise<Message> {
+    async editReply(content: ReplyContent, options?: { ephemeral?: boolean }): Promise<Message> {
         if (!this.deferred && !this.replied)
             throw new Error("Cannot edit before reply/defer!");
 
-        const payload = this.preparePayload(content, false);
-        delete payload.flags;
+        const payload = this.preparePayload(content, options?.ephemeral);
 
         return (await this.command.editReply(payload)) as Message;
     }
@@ -158,6 +196,27 @@ export class CommandContext extends Context {
         optionName: string = "image"
     ): Promise<Attachment | null> {
         return this.command.options.getAttachment(optionName) || null;
+    }
+
+    async parseMember(optionName: string, _argIndex?: number): Promise<GuildMember | null> {
+        const member = this.command.options.getMember(optionName);
+        return member as GuildMember | null;
+    }
+
+    async parseUser(optionName: string, _argIndex?: number): Promise<User | null> {
+        return this.command.options.getUser(optionName);
+    }
+
+    async parseChannel(optionName: string, _argIndex?: number): Promise<any | null> {
+        return this.command.options.getChannel(optionName);
+    }
+
+    parseString(optionName: string, _argIndex?: number, _consumeRest?: boolean): string | null {
+        return this.command.options.getString(optionName);
+    }
+
+    parseInteger(optionName: string, _argIndex?: number): number | null {
+        return this.command.options.getInteger(optionName);
     }
 }
 
@@ -200,19 +259,19 @@ export class MessageContext extends Context {
 
     async reply(
         content: ReplyContent,
-        _options?: { ephemeral?: boolean }
+        options?: { ephemeral?: boolean }
     ): Promise<Message> {
         const sent = await this.message.reply(
-            this.preparePayload(content, false)
+            this.preparePayload(content, options?.ephemeral)
         );
         this.replyMsg = sent;
         this.replied = true;
         return sent;
     }
 
-    async editReply(content: ReplyContent): Promise<Message> {
+    async editReply(content: ReplyContent, options?: { ephemeral?: boolean }): Promise<Message> {
         if (!this.replyMsg) throw new Error("You must reply() first!");
-        return await this.replyMsg.edit(this.preparePayload(content, false));
+        return await this.replyMsg.edit(this.preparePayload(content, options?.ephemeral));
     }
 
     async getAttachment(
@@ -236,5 +295,41 @@ export class MessageContext extends Context {
         }
 
         return null;
+    }
+
+    async defer(_ephemeral?: boolean): Promise<void> {
+        if (this.channel && "sendTyping" in this.channel) {
+            await this.channel.sendTyping();
+        }
+    }
+
+    async parseMember(_optionName: string, argIndex: number = 0): Promise<GuildMember | null> {
+        if (!this.guild || !this.args[argIndex]) return null;
+        const id = this.args[argIndex].replace(/[<@!>]/g, "");
+        return await this.guild.members.fetch(id).catch(() => null);
+    }
+
+    async parseUser(_optionName: string, argIndex: number = 0): Promise<User | null> {
+        if (!this.args[argIndex]) return null;
+        const id = this.args[argIndex].replace(/[<@!>]/g, "");
+        return await this.client.users.fetch(id).catch(() => null);
+    }
+
+    async parseChannel(_optionName: string, argIndex: number = 0): Promise<any | null> {
+        if (!this.guild || !this.args[argIndex]) return null;
+        const id = this.args[argIndex].replace(/[<#>]/g, "");
+        return await this.guild.channels.fetch(id).catch(() => null);
+    }
+
+    parseString(_optionName: string, argIndex: number = 0, consumeRest: boolean = false): string | null {
+        if (!this.args[argIndex]) return null;
+        if (consumeRest) return this.args.slice(argIndex).join(" ");
+        return this.args[argIndex];
+    }
+
+    parseInteger(_optionName: string, argIndex: number = 0): number | null {
+        if (!this.args[argIndex]) return null;
+        const parsed = parseInt(this.args[argIndex], 10);
+        return isNaN(parsed) ? null : parsed;
     }
 }

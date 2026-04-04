@@ -41,8 +41,8 @@ This report evaluates the current state of the Quinn project against the goals a
 
 *   **Issue #10: Ping Command (Basic Test)** - ✅ **Solved**
     *   Implemented in `src/commands/utilities/ping.ts`. The command successfully utilizes the normalized `Context` object to answer both slash interactions and raw messages.
-*   **Issue #11: Kick Command (Complex Test)** - ❌ **Not Started**
-    *   The `kick.ts` command has not been created yet to demonstrate complex configurations like `modOnly` and `requireHierarchy`.
+*   **Issue #11: Kick Command (Complex Test)** - ✅ **Solved**
+    *   The `kick.ts` command has been created in `src/commands/moderation/kick.ts` to demonstrate complex configurations like `modOnly` and `requireHierarchy`.
 
 ## Conclusion
 
